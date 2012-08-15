@@ -1,0 +1,6 @@
+indexes:
+- kind: Stream
+  properties:
+  - name: userid
+  - name: created
+    direction: desc

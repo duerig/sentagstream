@@ -1,0 +1,79 @@
+Here is my own effort to create a prototype tagging system that we can use to try out various ideas. It just uses post/get variables for arguments so we can just use curl or any http library to interact with it.
+
+Lets start with a simple social graph. I'm going to use letters for userids here even though you will want to use app.net userids which are numbers for the real deal. Bob follows Alice and Alice follows Carol. We add these relationships using the follow command.
+
+  > curl -F 'userid=a' -F 'followers=["b"]' -F 'followed=["c"]' sentagstream.appspot.com/follow
+
+Now Carol comes across a hilarious lolcat so she tags it as "+funny" with her client. It makes the following call to indicate that Carol thought the post was funny.
+
+  > curl -F 'postid=0' -F 'post=lolcat' -F 'user=c' -F 'key=funny' -F 'value=+' sentagstream.appspot.com/tag
+
+When Alice's client next grab's Alice's stream, it sees Carol's new tag on it. Depending on the filter used, it uses that tag to decide whether to show Alice the message.
+
+  > curl -F 'userid=a' sentagstream.appspot.com/stream
+  [{"post": "lolcat", "postid": "0", "tags": [{"value": "+", "user": "c", "key": "funny"}]}]
+
+Lets say that it does show Alice the message, but she is offended by the lolcat's grammar so she tags it as -funny. Her client adds the tag for her.
+
+  > curl -F 'postid=0' -F 'post=lolcat' -F 'user=a' -F 'key=funny' -F 'value=-' sentagstream.appspot.com/tag
+
+Now when Bob's client grabs his stream, it will see Alice's tag but not Carol's tag because he only follows Alice. His client will see that it is marked not-funny so will not show the lolcat to him (depending on his client's filter).
+
+  > curl -F 'userid=b' sentagstream.appspot.com/stream
+  [{"post": "lolcat", "postid": "0", "tags": [{"value": "-", "user": "a", "key": "funny"}]}]
+
+If you want a global view of the tags on this post, you can get it by postid and see all the tags that everyone has attached to it.
+
+  > curl -F 'postid=0' sentagstream.appspot.com/get
+  [{"post": "lolcat", "postid": "0", "tags": [{"value": "+", "user": "c", "key": "funny"}, {"value": "-", "user": "a", "key": "funny"}]}]
+
+Now you can upload parts of the actual app.net social graph and start using actual users/posts and tagging them.
+
+Available at: sentagstream.appspot.com
+No authorization, will likely not scale to heavy usage. This is really only good for prototyping. It can tide us over until a more real implementation is completed by the app.net crew.
+
+All parameters can be passed as get or post variables. It has the following entry points:
+
+/follow
+
+  'userid': An app.net userid (ex: "234") to add followers/followed to.
+  'followers': A JSON-encoded list of strings each of which is an app.net userid (ex: "234"). These will be marked as followers of user.
+  'followed': A JSON-encoded list of strings each of which is an app.net userid (ex: "234"). The user will be marked as followers of these.
+
+  Returns: Nothing
+
+/tag
+
+  'postid': An app.net postid (ex: "5320") of the post to tag.
+  'post': A JSON-encoded app.net post object. This will be stored in the database if this is the first time this post has been tagged (only tagged posts are stored here).
+  'user': An app.net userid (ex: "234") which is the user which tagged the object.
+  'key': A string (should be [a-zA-Z]+ but not enforced) which is an opaque tag name.
+  'value': A string (arbitrary) associated with the key. A simple scheme might just use "+" or "-". More complicated ones might use numbers, ids, etc.
+
+  Returns: Nothing
+
+/stream
+
+  'userid': An app.net userid (ex: "234")
+
+  Returns: A json-encoded structure of posts tagged by the users that are followed by that user.
+
+    [ {"post": <json-encoded post object as a string>,
+       "postid": <app.net postid>,
+       "tags": [{"user": <app.net userid>, "key": <key>, "value": <value>}
+                ...]
+      }
+    ...]
+
+/get
+
+  'postid': An app.net postid (ex: "5320")
+
+  Returns: A json-encoded structure of posts tagged by any users.
+
+    [ {"post": <json-encoded post object as a string>,
+       "postid": <app.net postid>,
+       "tags": [{"user": <app.net userid>, "key": <key>, "value": <value>}
+                ...]
+      }
+    ...]

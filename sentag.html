@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+        <meta charset="utf-8">
+        <title>quickApp - App.net Mega Double Plus Extreme Web Client</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="A quick responsive App.net client for the web">
+    <meta name="author" content="@q on AppDotNet">
+    <link rel="stylesheet" style="text/css" href="http://www.quickapplabs.com/css/bootstrap.min.css">
+        <link rel="stylesheet" style="text/css" href="http://www.quickapplabs.com/css/bootstrap-responsive.min.css">
+        <link rel="stylesheet" style="text/css" href="http://www.quickapplabs.com/css/appdotnet.css">
+        <script src="http://www.quickapplabs.com/js/jquery.js"></script>
+        <script src="http://www.quickapplabs.com/js/jquery.cookie.js"></script>
+        <script src="http://www.quickapplabs.com/js/jquery.easydate.js"></script>
+        <script src="http://www.quickapplabs.com/js/jquery.simplemodal.js"></script>
+    <script src="http://www.quickapplabs.com/js/bootstrap.min.js"></script>
+    <script src="appdotnet.js"></script>
+        <script>
+                var accessToken = "";
+                var currentUser = "";
+                var globalFeedTimer;
+                var modalWindow;
+                var didScroll = false;
+
+                var callbackUrl = "http://www.quickapplabs.com/";
+
+                $(document).ready(function() {
+                        var hash = window.location.hash;
+                        if (hash.length > 0) {
+                                accessToken = hash.substring(hash.indexOf('access_token')).split('=')[1];
+                                $.cookie("quickAppAccessToken", accessToken, { expires: 30, path: "/" });
+                                window.location.href = "http://www.jonathonduerig.com/sentag.html";
+                        }
+                        if ($.cookie("quickAppAccessToken") != null) {
+                                accessToken = $.cookie("quickAppAccessToken");
+                                // have access - get user info
+                                getUserInfo();
+                        }
+
+                        setInterval(function() {
+                                if (didScroll) {
+                                        didScroll = false;
+                                        if ($("#global-tab-container").children().length > 0) {
+                                                var firstPostHolder = $("#global-tab-container").children()[0];
+                                                if (firstPostHolder.getBoundingClientRect().top < 0) {
+                                                        updateFeedDisplay = false;
+                                                } else {
+                                                        updateFeedDisplay = true;
+                                                }
+                                                var lastPostHolder = $("#global-tab-container").children()[$("#global-tab-container").children().length -1];
+                                                var lastPostOnPage = $(lastPostHolder).attr("id").split("|")[1];
+                                                var viewBottom = $(window).scrollTop() + $(window).height();
+                                                if ($(lastPostHolder).offset().top < viewBottom) {
+                                                        // last post is on-screen - get more
+                                                        console.log("Autoscroll ACTIVATE!");
+                                                        clearTimeout(globalFeedTimer);
+                                                        getOlderPosts(lastPostOnPage);
+                                                }
+                                        }
+                                }
+                        }, 500);
+
+                        // event handlers
+                        $("body").on("click", ".repostButton", function(event) {
+                                event.preventDefault();
+                                var postId = event.target.id.split("|")[1];
+                                var index = event.target.id.split("|")[2];
+                                var post = JSON.stringify(feedArray[index]);
+                                // get the original post
+                                $.post("http://sentagstream.appspot.com/tag", { postid: postId, post: post, user: userId, key: "share", value: "+" }, function(data) {
+                                });
+                        });
+
+                        $(window).scroll(function() {
+                                didScroll = true;
+                        });
+
+                        $("body").on("click", ".replyButton", function(event) {
+                                event.preventDefault();
+                                var postId = event.target.id.split("|")[1];
+                                $.get("https://alpha-api.app.net/stream/0/posts/" + postId, { access_token: accessToken }, function(data) {
+                                        var replyfield = document.getElementById("replyfield|" + data.id);
+                                        replyfield.value = "";
+                                        var replycounter = document.getElementById("replycounter|" + data.id);
+                                        replyfield.value = replyfield.value + "@" + data.user.username + " ";
+                                        if (data.entities.mentions.length > 0) {
+                                                for (i = data.entities.mentions.length -1; i > -1; i--) {
+                                                        if (data.entities.mentions[i].name != currentUser.username)     replyfield.value = replyfield.value + "@" + data.entities.mentions[i].name + " ";
+                                                }
+                                        }
+                                        var characterCount = $(replycounter).html() - replyfield.value.length;
+                                        $(replycounter).html(characterCount);
+                                        var replycontainer = document.getElementById("replycontainer|" + data.id);
+                                        if ($(replycontainer).css("display") == "none") {
+                                                $(".replyContainer").hide();
+                                                $(replycontainer).show("fast");
+                                                updateFeedDisplay = false;
+                                                console.log("updateFeedDisplay: off    feedBuffer:");
+                                                console.log(feedBuffer);
+                                        } else {
+                                                $(replycontainer).hide("fast");
+                                                updateFeedDisplay = true;
+                                                console.log("updateFeedDisplay: on");
+                                        }
+                                });
+                        });
+
+                        $("body").on("keyup", ".replyField", function(event) {
+                                var postId = event.target.id.split("|")[1];
+                                var current = document.getElementById("replyfield|" + postId).value;
+                                var counter = document.getElementById("replycounter|" + postId);
+                                $(counter).html(256 - current.length);
+                                if (256 - current.length < 0) {
+                                        $(counter).addClass("overage");
+                                } else {
+                                        $(counter).removeClass("overage");
+                                }
+                        });
+
+                        $("body").on("click", ".replySendButton", function(event) {
+                                event.preventDefault();
+                                var postId = event.target.id.split("|")[1];
+                                var currentField = document.getElementById("replyfield|" + postId);
+                                var current = document.getElementById("replyfield|" + postId).value;
+                                if (current.length > 0) {
+                                        postReply(current, postId);
+                                        var counter = document.getElementById("replycounter|" + postId);
+                                        $(counter).html("256");
+                                        currentField.value = "";
+                                        $(".replyContainer").hide();
+                                        updateFeedDisplay = true;
+                                        console.log("updateFeedDisplay: on");
+                                }
+                        });
+
+                        $("body").on("click", ".feedtab", function(event) {
+                                event.preventDefault();
+                                clearTimeout(globalFeedTimer);
+                                var tab = event.target.id.split("-")[0];
+                                window.location.hash = "#" + tab;
+                                $("#global-tab-container").html("");
+                                updateGlobalFeed();
+                        });
+
+                        $("body").on("click", ".appNetPostHashtag", function(event) {
+                                event.preventDefault();
+                                clearTimeout(globalFeedTimer);
+                                var hashtag = event.target.innerHTML;
+                                console.log("Clicked " + hashtag);
+                                if (!document.getElementById(hashtag + "-tab")) {
+                                        $("#main-tabs").append("<li><a href='#' data-toggle='tab' class='feedtab' id='" + hashtag.substr("1") + "-tab'>" + hashtag + " </a><a href='#' class='feedtab-close-button'><i class='icon-remove'></i></a></li>");
+                                }
+                                window.location.hash = hashtag;
+                                $("#global-tab-container").html("");
+                                updateGlobalFeed();
+                        });
+
+                        $("body").on("click", ".feedtab-close-button", function(event) {
+                                console.log("Close button clicked.");
+                                event.preventDefault();
+                                clearTimeout(globalFeedTimer);
+                                var tab = event.target.parentElement.parentElement;
+                                $(tab).remove();
+                                window.location.hash = "";
+                                $("#global-tab-container").html("");
+                                updateGlobalFeed();
+                        });
+
+                        $("body").on("click", "#add-tab", function(event) {
+                                modalWindow = $.modal(document.getElementById("open-tag-modal"));
+                                $("#add-tab-tag").focus();
+                        })
+
+                        $("body").on("click", "#add-tab-button", function(event) {
+                                event.preventDefault();
+                                $("#add-tab-button").removeClass("active");
+                                clearTimeout(globalFeedTimer);
+                                var hashtag = document.getElementById("add-tab-tag").value;
+                                modalWindow.close();
+                                console.log("Opening tab for hashtag " + hashtag);
+                                if (!document.getElementById(hashtag + "-tab")) {
+                                        $("#main-tabs").append("<li><a href='#' data-toggle='tab' class='feedtab' id='" + hashtag + "-tab'>#" + hashtag + " </a><a href='#' class='feedtab-close-button'><i class='icon-remove'></i></a></li>");
+                                }
+                                window.location.hash = hashtag;
+                                $("#global-tab-container").html("");
+                                updateGlobalFeed();
+                        });
+
+                        $("body").on("keydown", "#add-tab-tag", function(event) {
+                                if (event.keyCode == 13) {
+                                        $("#add-tab-button").click();
+                                }
+                        });
+
+                        $('#main-tabs').tab();
+                });
+        </script>
+</head>
+<body>
+        <div id="open-tag-modal" class="modal">
+                <h1>Open tab for tag #</h1><input type="text" id="add-tab-tag"> <a class="btn btn-primary" id="add-tab-button">Go!</a></h1>
+        </div>
+        <div id="wrapper">
+                <div class="navbar navbar-fixed-top">
+                  <div class="navbar-inner">
+                    <div class="container">
+                <a class="brand" href="#">quickApp</a>
+                      <div class="nav-collapse">
+                        <ul class="nav">
+                                        <li><a href=".">home</a></li>
+                                        <li><a href="about/">about</a></li>
+                                        <li><a href="contact/">contact</a></li>
+<!--
+                                        <li><a href="https://alpha.app.net/oauth/authenticate?client_id=hGLwYHZmT7N5E6HYNDJ6XEQNYEZkydf4&response_type=token&redirect_uri=http://www.quickapplabs.com/&scope=stream%20write_post%20email%20follow%20messages">login</a></li>
+-->
+                        </ul>
+                     </div>
+                   </div>
+                  </div>
+                </div>
+                <div class="container">
+                        <div id="main" class="hero-unit">
+                                <h1>Hello, App.netizens!</h1>
+                                <hr>
+                                <p>What you see before you is my web-based client for interacting with <a href="http://app.net" target="_blank">App.net</a> via any modern browser.  It may be just what you're looking for.</p>
+                                <p>I'm writing it mostly to see if I can make a web-based client that does exactly what I want it to do.  I think some others of you might like it, too.  I'm also just playing with the App.net API to see what new things we can all come up with on it.  So, if you have an idea, feel free to throw it my way.  No promises, but we'll see what we can all do together.</p>
+                                <p>To try out, just <a class="btn btn-primary btn-large" href="https://alpha.app.net/oauth/authenticate?client_id=EFwhvsrPDfpFBjdTuZKw5K334vcj7xuF&response_type=token&redirect_uri=http://www.jonathonduerig.com/sentag.html&scope=stream%20write_post%20email%20follow%20messages">connect with App.net</a> and take it for a spin!</p>
+                                <p>Let me know if you run into any troubles, and we'll get it sorted.</p>
+                                <p>~ @q</p>
+                        </div>
+                        <div id="main-logged" class="hero-unit">
+                                <div class="row-fluid">
+                                        <div id="user_info" class="span6">
+                                                <img id="user_avatar" src="#" width="70" height="70">
+                                                <h2 id="user_name"></h2>
+                                                <h2 id="user_username"></h2>
+                                        </div>
+                                        <div id="post_box" class="span6">
+                                                <textarea id="main_post"></textarea><br clear="both">
+                                                <span id="post_counter">256</span>
+                                                <button id="post_button" class="post_button btn">Post</button>
+                                        </div>
+                                </div>
+                                <br clear="both">
+                                <hr>
+                                <div class="tabbable">
+
+                                        <ul class="nav nav-tabs" id="main-tabs">
+                                                <li><a href="#" data-toggle="tab" id="add-tab">Add Tab</a></li>
+                                                <li><a href="#" data-toggle="tab" class="feedtab" id="global-tab">Global Feed</a></li>
+                                                <li><a href="#" data-toggle="tab" class="feedtab" id="personal-tab">My Feed</a></li>
+                                                <li><a href="#" data-toggle="tab" class="feedtab" id="mentions-tab">My Mentions</a></li>
+                                        </ul>
+
+                                        <div id="global-tab-container" class="tab-pane">
+                                        </div>
+                                </div>
+                        <footer>
+                        <p>&copy; QuickAppLabs 2012</p>
+                </footer>
+                </div>
+        </div>
+</body>
+</html>
